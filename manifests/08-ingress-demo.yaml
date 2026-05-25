@@ -1,0 +1,31 @@
+# 08-ingress-demo.yaml — NVIDIA Cluster Readiness #11
+# Mục tiêu: tạo Ingress trên subdomain *.team-NN.h200.viettel.vn.
+# Goal: prove the team's wildcard subdomain reaches a workload via Ingress.
+#
+# Required env:
+#   TEAM_NN   e.g. 04   (zero-padded team number)
+#
+# ingressClassName defaults to `nginx`. If your cluster uses a different
+# class (e.g. `traefik`), edit before apply or set INGRESS_CLASS.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: chk-08-ingress
+  labels:
+    app.kubernetes.io/part-of: servers-checklist
+    chk: "08-ingress"
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+spec:
+  ingressClassName: ${INGRESS_CLASS}
+  rules:
+  - host: chk08.team-${TEAM_NN}.h200.viettel.vn
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: chk-07-demo
+            port:
+              number: 80

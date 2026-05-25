@@ -1,0 +1,43 @@
+# 01-gpu-smi.yaml — NVIDIA Cluster Readiness #1, #2
+# Mục tiêu: xác minh team thấy được H200 GPU qua nvidia-smi.
+# Goal: confirm the team can see at least one H200 via nvidia-smi.
+#
+# Required env (substituted by check.sh via envsubst):
+#   TEAM_NODE  e.g. hgx076   (kubernetes.io/hostname of the team's dedicated HGX)
+apiVersion: v1
+kind: Pod
+metadata:
+  name: chk-01-gpu-smi
+  labels:
+    app.kubernetes.io/part-of: servers-checklist
+    chk: "01-gpu-smi"
+spec:
+  restartPolicy: Never
+  nodeSelector:
+    kubernetes.io/hostname: ${TEAM_NODE}
+  securityContext:
+    runAsUser: 1006
+    runAsGroup: 1010
+    runAsNonRoot: true
+    fsGroup: 1010
+    supplementalGroups: [1009, 1010]
+  containers:
+  - name: smi
+    image: nvidia/cuda:12.4.0-base-ubuntu22.04
+    imagePullPolicy: IfNotPresent
+    command: ["bash", "-lc"]
+    args:
+    - |
+      set -e
+      echo "=== nvidia-smi -L ==="
+      nvidia-smi -L
+      echo "=== nvidia-smi ==="
+      nvidia-smi
+      # Sentinel for check.sh
+      nvidia-smi -L | grep -q "H200" && echo "CHECK_PASS: H200 visible"
+    resources:
+      requests: { nvidia.com/gpu: "1" }
+      limits:   { nvidia.com/gpu: "1" }
+    securityContext:
+      allowPrivilegeEscalation: false
+      privileged: false

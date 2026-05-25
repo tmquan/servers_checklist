@@ -1,0 +1,67 @@
+# 03-nccl-allreduce.yaml — NVIDIA Cluster Readiness #7, #8
+# Mục tiêu: chạy NCCL all_reduce_perf trên 8 GPU NVLink, kỳ vọng ≥80% peak.
+# Goal: NCCL all_reduce on 8 GPUs over NVLink, expect ≥80% theoretical peak.
+#
+# Note: requires the same 8 GPUs as 02-gpu-eight, so do not run them in
+# parallel. nccl-tests is invoked from the PyTorch NGC image which ships
+# with /opt/nccl_tests pre-built.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: chk-03-nccl
+  labels:
+    app.kubernetes.io/part-of: servers-checklist
+    chk: "03-nccl"
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels:
+        chk: "03-nccl"
+    spec:
+      restartPolicy: Never
+      nodeSelector:
+        kubernetes.io/hostname: ${TEAM_NODE}
+      imagePullSecrets:
+      - name: ngc-registry
+      securityContext:
+        runAsUser: 1006
+        runAsGroup: 1010
+        runAsNonRoot: true
+        fsGroup: 1010
+        supplementalGroups: [1009, 1010]
+      volumes:
+      - name: dshm
+        emptyDir: { medium: Memory, sizeLimit: 32Gi }
+      containers:
+      - name: nccl
+        image: nvcr.io/nvidia/pytorch:24.10-py3
+        imagePullPolicy: IfNotPresent
+        command: ["bash", "-lc"]
+        args:
+        - |
+          set -e
+          export NCCL_DEBUG=WARN
+          BIN=$(command -v all_reduce_perf || ls /opt/nccl_tests/build/all_reduce_perf 2>/dev/null || true)
+          if [ -z "$BIN" ]; then
+            echo "all_reduce_perf not found; building from source is out of scope" >&2
+            exit 2
+          fi
+          echo "=== NCCL all_reduce on 8 GPU (NVLink) ==="
+          "$BIN" -b 8 -e 8G -f 2 -g 8 | tee /tmp/nccl.log
+          BUSBW=$(awk '/^[[:space:]]*8589934592/ {print $(NF-1)}' /tmp/nccl.log)
+          echo "BUSBW_8G=${BUSBW} GB/s"
+          # H200 NVLink theoretical bidirectional ≈ 900 GB/s; busbw target ≥ 0.80 × bw_peak.
+          # Use 380 GB/s as a conservative single-direction busbw floor (≈80% of typical).
+          awk -v b="${BUSBW:-0}" 'BEGIN { exit !(b+0 >= 380) }' \
+            && echo "CHECK_PASS: NCCL busbw ${BUSBW} GB/s >= 380 GB/s" \
+            || echo "CHECK_FAIL: NCCL busbw ${BUSBW} GB/s < 380 GB/s"
+        resources:
+          requests: { nvidia.com/gpu: "8" }
+          limits:   { nvidia.com/gpu: "8" }
+        securityContext:
+          allowPrivilegeEscalation: false
+          privileged: false
+        volumeMounts:
+        - { name: dshm, mountPath: /dev/shm }

@@ -1,0 +1,53 @@
+# 05-gds-check.yaml — NVIDIA Cluster Readiness #14
+# Mục tiêu: xác nhận GPU Direct Storage được bật trên mount của team.
+# Goal: confirm GPU Direct Storage (cuFile) is operational on the team's mount.
+#
+# `gdscheck.py -p` is shipped with the CUDA runtime image under
+# /usr/local/cuda/gds/tools. It reports per-fs cuFile capability.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: chk-05-gds
+  labels:
+    app.kubernetes.io/part-of: servers-checklist
+    chk: "05-gds"
+spec:
+  restartPolicy: Never
+  nodeSelector:
+    kubernetes.io/hostname: ${TEAM_NODE}
+  securityContext:
+    runAsUser: 1006
+    runAsGroup: 1010
+    runAsNonRoot: true
+    fsGroup: 1010
+    supplementalGroups: [1009, 1010]
+  volumes:
+  - name: workspace
+    persistentVolumeClaim:
+      claimName: ${PVC_NAME}
+  containers:
+  - name: gds
+    image: nvcr.io/nvidia/cuda:12.6.2-devel-ubuntu22.04
+    imagePullPolicy: IfNotPresent
+    command: ["bash", "-lc"]
+    args:
+    - |
+      set -e
+      TOOL=$(ls /usr/local/cuda*/gds/tools/gdscheck* 2>/dev/null | head -1 || true)
+      if [ -z "$TOOL" ]; then
+        echo "gdscheck not found in image; report to admin (need cuda-gds package)" >&2
+        exit 2
+      fi
+      echo "=== gdscheck -p ==="
+      "$TOOL" -p | tee /tmp/gds.log
+      grep -Eq "GDS Operational Status: +Enabled" /tmp/gds.log \
+        && echo "CHECK_PASS: GDS enabled" \
+        || echo "CHECK_INFO: GDS not reported as Enabled — see log above"
+    resources:
+      requests: { nvidia.com/gpu: "1" }
+      limits:   { nvidia.com/gpu: "1" }
+    securityContext:
+      allowPrivilegeEscalation: false
+      privileged: false
+    volumeMounts:
+    - { name: workspace, mountPath: /workspace }

@@ -1,0 +1,62 @@
+# 04-storage-io.yaml — NVIDIA Cluster Readiness #14
+# Mục tiêu: đo throughput đọc/ghi 10 GiB tuần tự trên PVC team.
+# Goal: 10 GiB sequential write+read fio benchmark on the team's PVC.
+#
+# Required env:
+#   PVC_NAME   the team's workspace/GPFS-backed PVC (default: workspace).
+#              For team-04 baseline, only `nemotron-nano-8b-cache` (200Gi
+#              local-path) exists — see CHECKLIST.md §14 for how to request
+#              the 10 TiB GPFS fileset PVC from the cluster admin.
+#   TEAM_NODE  the team's HGX node hostname.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: chk-04-storage-io
+  labels:
+    app.kubernetes.io/part-of: servers-checklist
+    chk: "04-storage-io"
+spec:
+  restartPolicy: Never
+  nodeSelector:
+    kubernetes.io/hostname: ${TEAM_NODE}
+  securityContext:
+    runAsUser: 1006
+    runAsGroup: 1010
+    runAsNonRoot: true
+    fsGroup: 1010
+    supplementalGroups: [1009, 1010]
+  volumes:
+  - name: workspace
+    persistentVolumeClaim:
+      claimName: ${PVC_NAME}
+  containers:
+  - name: fio
+    image: nvcr.io/nvidia/cuda:12.6.2-runtime-ubuntu22.04
+    imagePullPolicy: IfNotPresent
+    command: ["bash", "-lc"]
+    args:
+    - |
+      set -e
+      apt-get update -qq >/dev/null 2>&1 || true
+      command -v fio >/dev/null || apt-get install -y -qq fio >/dev/null 2>&1 || {
+        echo "fio install failed — image may not allow apt; rerun with a fio-baked image" >&2
+        exit 2
+      }
+      cd /workspace/.chk-04-$$ 2>/dev/null || { mkdir -p /workspace/.chk-04-$$ && cd /workspace/.chk-04-$$; }
+      echo "=== fio seq-write 10G ==="
+      fio --name=w --rw=write --bs=1M --size=10G --direct=1 --numjobs=1 \
+          --ioengine=libaio --iodepth=16 --group_reporting --output-format=normal | tee /tmp/w.log
+      echo "=== fio seq-read 10G ==="
+      fio --name=r --rw=read  --bs=1M --size=10G --direct=1 --numjobs=1 \
+          --ioengine=libaio --iodepth=16 --group_reporting --output-format=normal | tee /tmp/r.log
+      cd / && rm -rf /workspace/.chk-04-$$
+      WBW=$(awk '/WRITE: bw=/ {print $0}' /tmp/w.log | head -1)
+      RBW=$(awk '/READ:  bw=/  {print $0}' /tmp/r.log | head -1)
+      echo "WRITE_LINE: ${WBW}"
+      echo "READ_LINE:  ${RBW}"
+      [ -n "${WBW}" ] && [ -n "${RBW}" ] && echo "CHECK_PASS: storage IO measured"
+    securityContext:
+      allowPrivilegeEscalation: false
+      privileged: false
+    volumeMounts:
+    - { name: workspace, mountPath: /workspace }

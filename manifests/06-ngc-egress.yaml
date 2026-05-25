@@ -1,0 +1,38 @@
+# 06-ngc-egress.yaml — NVIDIA Cluster Readiness #6
+# Mục tiêu: kiểm tra outbound HTTPS đến nvcr.io và build.nvidia.com.
+# Goal: verify outbound HTTPS reachability to NGC + NIM API.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: chk-06-ngc-egress
+  labels:
+    app.kubernetes.io/part-of: servers-checklist
+    chk: "06-ngc-egress"
+spec:
+  restartPolicy: Never
+  nodeSelector:
+    kubernetes.io/hostname: ${TEAM_NODE}
+  securityContext:
+    runAsUser: 1006
+    runAsGroup: 1010
+    runAsNonRoot: true
+    fsGroup: 1010
+    supplementalGroups: [1009, 1010]
+  containers:
+  - name: curl
+    image: curlimages/curl:8.10.1
+    imagePullPolicy: IfNotPresent
+    command: ["sh", "-lc"]
+    args:
+    - |
+      set -e
+      echo "=== curl https://nvcr.io/v2/ ==="
+      curl -sfI -m 10 https://nvcr.io/v2/ -o /tmp/nvcr.h && head -1 /tmp/nvcr.h
+      echo "=== curl https://build.nvidia.com/ ==="
+      curl -sfI -m 10 https://build.nvidia.com/ -o /tmp/bld.h && head -1 /tmp/bld.h
+      echo "=== DNS ==="
+      getent hosts nvcr.io build.nvidia.com || true
+      echo "CHECK_PASS: NGC + NIM endpoints reachable"
+    securityContext:
+      allowPrivilegeEscalation: false
+      privileged: false

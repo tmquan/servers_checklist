@@ -1,0 +1,57 @@
+# 07-portforward-demo.yaml — NVIDIA Cluster Readiness #10
+# Mục tiêu: deploy 1 service nginx để test kubectl port-forward 8000-8100.
+# Goal: tiny nginx Deployment + Service to validate port-forward demo path.
+#
+# After applying, run from the team laptop:
+#   kubectl port-forward --address 0.0.0.0 svc/chk-07-demo 80NN:80
+# where NN is the team number (e.g. 8004 for team-04). Judges then access:
+#   https://login.h200.viettel.vn:80NN
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: chk-07-demo
+  labels:
+    app.kubernetes.io/part-of: servers-checklist
+    chk: "07-portforward"
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: chk-07-demo }
+  template:
+    metadata:
+      labels: { app: chk-07-demo, chk: "07-portforward" }
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: ${TEAM_NODE}
+      securityContext:
+        runAsUser: 1006
+        runAsGroup: 1010
+        runAsNonRoot: true
+        fsGroup: 1010
+        supplementalGroups: [1009, 1010]
+      containers:
+      - name: web
+        image: nginxinc/nginx-unprivileged:1.27-alpine
+        imagePullPolicy: IfNotPresent
+        ports:
+        - { containerPort: 8080, name: http }
+        readinessProbe:
+          httpGet: { path: /, port: 8080 }
+          initialDelaySeconds: 2
+          periodSeconds: 5
+        securityContext:
+          allowPrivilegeEscalation: false
+          privileged: false
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: chk-07-demo
+  labels:
+    chk: "07-portforward"
+spec:
+  type: ClusterIP
+  selector: { app: chk-07-demo }
+  ports:
+  - { name: http, port: 80, targetPort: 8080 }
